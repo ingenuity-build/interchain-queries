@@ -2,15 +2,13 @@ module github.com/ingenuity-build/interchain-queries
 
 go 1.17
 
-replace github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
-
 require (
 	github.com/cosmos/cosmos-sdk v0.45.1
-	github.com/cosmos/ibc-go/v2 v2.0.2
-	github.com/ingenuity-build/quicksilver interchainqueries
+	github.com/cosmos/ibc-go/v2 v2.0.3
+	github.com/ingenuity-build/quicksilver v0.0.2-0.20220217004307-db0591c82c24
 	github.com/spf13/cobra v1.3.0
 	github.com/spf13/viper v1.10.1
-	github.com/strangelove-ventures/lens v0.2.1
+	github.com/strangelove-ventures/lens v0.2.2-0.20220131192754-f2a69f2e3fd7
 	github.com/tendermint/tendermint v0.34.15
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292
 	gopkg.in/yaml.v2 v2.4.0
@@ -35,7 +33,7 @@ require (
 	github.com/cosmos/iavl v0.17.3 // indirect
 	github.com/cosmos/ledger-cosmos-go v0.11.1 // indirect
 	github.com/cosmos/ledger-go v0.9.2 // indirect
-	github.com/cosmos/relayer v1.0.1-0.20220107210018-e85b7af9a30b // indirect
+	github.com/cosmos/relayer v1.0.1-0.20220211165707-31d6f6c6d3ae // indirect
 	github.com/danieljoos/wincred v1.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgraph-io/badger/v2 v2.2007.3 // indirect
@@ -101,7 +99,6 @@ require (
 	github.com/zondax/hid v0.9.0 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	golang.org/x/net v0.0.0-20211209124913-491a49abca63 // indirect
-	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
 	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9 // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
@@ -111,3 +108,7 @@ require (
 	gopkg.in/ini.v1 v1.66.3 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
+
+replace github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
+
+replace github.com/strangelove-ventures/lens => github.com/ingenuity-build/lens v0.3.1-0.20220221061456-8be34427289b

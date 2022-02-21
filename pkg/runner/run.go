@@ -7,24 +7,29 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ingenuity-build/interchain-queries/pkg/config"
 	qstypes "github.com/ingenuity-build/quicksilver/x/interchainquery/types"
-	"github.com/strangelove-ventures/lens/client"
+	lensclient "github.com/strangelove-ventures/lens/client"
+	"github.com/strangelove-ventures/lens/client/staking"
 	tmquery "github.com/tendermint/tendermint/libs/pubsub/query"
 	coretypes "github.com/tendermint/tendermint/rpc/core/types"
 )
 
-type Clients []*client.ChainClient
+type Clients []*lensclient.ChainClient
 
 var (
-	clients = Clients{}
-	ctx     = context.Background()
+	WaitInterval = time.Second * 2
+	clients      = Clients{}
+	ctx          = context.Background()
+	sendQueue    = map[string]chan sdk.Msg{}
 )
 
-func (clients Clients) GetForChainId(chainId string) *client.ChainClient {
+func (clients Clients) GetForChainId(chainId string) *lensclient.ChainClient {
 	for _, client := range clients {
-		if client.ChainId() == chainId {
+		if client.Config.ChainID == chainId {
 			return client
 		}
 	}
@@ -34,24 +39,25 @@ func (clients Clients) GetForChainId(chainId string) *client.ChainClient {
 func Run(cfg *config.Config, home string) error {
 	defer Close()
 	for _, c := range cfg.Chains {
-		client, err := client.NewChainClient(c, home, os.Stdin, os.Stdout)
-		fmt.Println(client)
+		client, err := lensclient.NewChainClient(c, home, os.Stdin, os.Stdout)
 		if err != nil {
 			return err
 		}
+		sendQueue[client.Config.ChainID] = make(chan sdk.Msg)
 		clients = append(clients, client)
 	}
 
 	query := tmquery.MustParse(fmt.Sprintf("message.module='%s'", "interchainquery"))
 
 	wg := &sync.WaitGroup{}
+
 	for _, client := range clients {
 		err := client.RPCClient.Start()
 		if err != nil {
 			fmt.Println(err)
 		}
 
-		ch, err := client.RPCClient.Subscribe(ctx, client.ChainId()+"-icq", query.String())
+		ch, err := client.RPCClient.Subscribe(ctx, client.Config.ChainID+"-icq", query.String())
 		if err != nil {
 			fmt.Println(err)
 			return err
@@ -60,10 +66,14 @@ func Run(cfg *config.Config, home string) error {
 		go func(chainId string, ch <-chan coretypes.ResultEvent) {
 			for v := range ch {
 				v.Events["source"] = []string{chainId}
-				fmt.Printf("v.Events: %v\n", v.Events)
 				go handleEvent(v)
 			}
-		}(client.ChainId(), ch)
+		}(client.Config.ChainID, ch)
+	}
+
+	for _, client := range clients {
+		wg.Add(1)
+		go FlushSendQueue(client.Config.ChainID)
 	}
 
 	wg.Wait()
@@ -94,9 +104,7 @@ func handleEvent(event coretypes.ResultEvent) {
 		query_params := parseParams(params, queryIds[i])
 		queries = append(queries, Query{source[0], connections[i], chains[i], queryIds[i], types[i], query_params})
 	}
-	// fmt.Println("----------------------")
-	// fmt.Println(queries)
-	// fmt.Println("----------------------")
+
 	for _, q := range queries {
 		go doRequest(q)
 	}
@@ -121,36 +129,108 @@ func doRequest(query Query) {
 	}
 	fmt.Println(query.Type)
 	var data []byte
-	var err error
 
 	switch query.Type {
 	case "cosmos.bank.v1beta1.Query/AllBalances":
-		balances, _ := client.QueryBalanceWithAddress(query.Params["address"])
-		data, err = json.Marshal(&balances)
+		balances, _ := client.QueryAllBalances(query.Params["address"])
+		data = client.Codec.Marshaler.MustMarshalJSON(balances)
+
+	case "cosmos.tx.v1beta1.Query/GetTxEvents":
+		txs, err := client.QueryTxs(1, 100, convertParamsToEvents(query.Params))
 		if err != nil {
 			panic(err)
 		}
 
-	}
-	sendTx(clients.GetForChainId(query.SourceChainId), query, data)
-
-}
-
-func sendTx(client *client.ChainClient, query Query, data []byte) error {
-	from, _ := client.Address()
-	msg := &qstypes.MsgSubmitQueryResponse{query.ChainId, query.QueryId, data, 0, from}
-	resp, err := client.SendMsg(context.Background(), msg)
-
-	fmt.Println(resp)
-	if err != nil {
-		if resp.Code == 19 && resp.Codespace == "sdk" {
-			//if err.Error() == "transaction failed with code: 19" {
-			fmt.Println("Tx in mempool")
-		} else {
+		data, err = json.Marshal(txs)
+		if err != nil {
 			panic(err)
 		}
+	case "cosmos.staking.v1beta1.Query/DelegatorDelegations":
+		delegations, _ := staking.QueryDelegations(client, query.Params["address"], lensclient.DefaultPageRequest())
+		data = client.Codec.Marshaler.MustMarshalJSON(delegations)
+
+	case "cosmos.staking.v1beta1.Query/Validators":
+		validators, err := staking.QueryValidators(client, query.Params["status"], lensclient.DefaultPageRequest())
+		if err != nil {
+			panic(err)
+		}
+		data = client.Codec.Marshaler.MustMarshalJSON(validators)
+
+	default:
+		fmt.Println("Unexpected query type: ", query.Type)
 	}
-	return nil
+
+	// submit tx to queue
+	submitClient := clients.GetForChainId(query.SourceChainId)
+	from, _ := submitClient.GetKeyAddress()
+	msg := &qstypes.MsgSubmitQueryResponse{query.ChainId, query.QueryId, data, 0, submitClient.MustEncodeAccAddr(from)}
+	sendQueue[query.SourceChainId] <- msg
+}
+
+func convertParamsToEvents(params map[string]string) []string {
+	out := []string{}
+	for k, v := range params {
+		out = append(out, fmt.Sprintf("%s='%s'", k, v))
+	}
+	return out
+}
+
+func FlushSendQueue(chainId string) {
+	time.Sleep(WaitInterval)
+	toSend := []sdk.Msg{}
+	ch := sendQueue[chainId]
+
+	for {
+		if len(toSend) > 10 {
+			flush(chainId, toSend)
+			toSend = []sdk.Msg{}
+		}
+		select {
+		case msg := <-ch:
+			toSend = append(toSend, msg)
+		case <-time.After(time.Millisecond * 800):
+			flush(chainId, toSend)
+			toSend = []sdk.Msg{}
+		}
+	}
+}
+
+func flush(chainId string, toSend []sdk.Msg) {
+	if len(toSend) > 0 {
+		fmt.Printf("Send batch of %d messages\n", len(toSend))
+		client := clients.GetForChainId(chainId)
+		if client == nil {
+			fmt.Println("No chain")
+			return
+		}
+		// dedupe on queryId
+		resp, err := client.SendMsgs(context.Background(), unique(toSend))
+		fmt.Println(resp)
+		if err != nil {
+			if resp != nil && resp.Code == 19 && resp.Codespace == "sdk" {
+				//if err.Error() == "transaction failed with code: 19" {
+				fmt.Println("Tx in mempool")
+			} else {
+				panic(err)
+			}
+		}
+		fmt.Printf("Sent batch of %d (deduplicated) messages\n", len(unique(toSend)))
+		// zero messages
+
+	}
+}
+
+func unique(msgSlice []sdk.Msg) []sdk.Msg {
+	keys := make(map[string]bool)
+	list := []sdk.Msg{}
+	for _, entry := range msgSlice {
+		msg := entry.(*qstypes.MsgSubmitQueryResponse)
+		if _, value := keys[msg.QueryId]; !value {
+			keys[msg.QueryId] = true
+			list = append(list, entry)
+		}
+	}
+	return list
 }
 
 func Close() error {
@@ -158,7 +238,7 @@ func Close() error {
 	query := tmquery.MustParse(fmt.Sprintf("message.module='%s'", "interchainquery"))
 
 	for _, client := range clients {
-		err := client.RPCClient.Unsubscribe(ctx, client.ChainId()+"-icq", query.String())
+		err := client.RPCClient.Unsubscribe(ctx, client.Config.ChainID+"-icq", query.String())
 		if err != nil {
 			return err
 		}

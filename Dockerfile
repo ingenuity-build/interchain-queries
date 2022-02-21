@@ -15,3 +15,5 @@ RUN go mod tidy
 RUN go build
 
 RUN ln -s /src/app/interchain-queries /usr/local/bin
+RUN adduser --system --home /icq --disabled-password --disabled-login icq -U 1000
+USER icq
