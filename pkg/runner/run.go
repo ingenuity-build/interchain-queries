@@ -2,9 +2,10 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,9 +14,10 @@ import (
 	"github.com/ingenuity-build/interchain-queries/pkg/config"
 	qstypes "github.com/ingenuity-build/quicksilver/x/interchainquery/types"
 	lensclient "github.com/strangelove-ventures/lens/client"
-	"github.com/strangelove-ventures/lens/client/staking"
+	abcitypes "github.com/tendermint/tendermint/abci/types"
 	tmquery "github.com/tendermint/tendermint/libs/pubsub/query"
 	coretypes "github.com/tendermint/tendermint/rpc/core/types"
+	"google.golang.org/grpc/metadata"
 )
 
 type Clients []*lensclient.ChainClient
@@ -86,7 +88,8 @@ type Query struct {
 	ChainId       string
 	QueryId       string
 	Type          string
-	Params        map[string]string
+	Height        int64
+	Request       []byte
 }
 
 func handleEvent(event coretypes.ResultEvent) {
@@ -96,13 +99,21 @@ func handleEvent(event coretypes.ResultEvent) {
 	chains := event.Events["message.chain_id"]
 	queryIds := event.Events["message.query_id"]
 	types := event.Events["message.type"]
-	params := event.Events["message.parameters"]
+	request := event.Events["message.request"]
+	height := event.Events["message.height"]
 
 	items := len(queryIds)
 
 	for i := 0; i < items; i++ {
-		query_params := parseParams(params, queryIds[i])
-		queries = append(queries, Query{source[0], connections[i], chains[i], queryIds[i], types[i], query_params})
+		req, err := hex.DecodeString(request[i])
+		if err != nil {
+			panic(err)
+		}
+		h, err := strconv.ParseInt(height[i], 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		queries = append(queries, Query{source[0], connections[i], chains[i], queryIds[i], types[i], h, req})
 	}
 
 	for _, q := range queries {
@@ -110,15 +121,34 @@ func handleEvent(event coretypes.ResultEvent) {
 	}
 }
 
-func parseParams(params []string, query_id string) map[string]string {
-	out := map[string]string{}
-	for _, p := range params {
-		if strings.HasPrefix(p, query_id) {
-			parts := strings.SplitN(p, ":", 3)
-			out[parts[1]] = parts[2]
-		}
+func RunGRPCQuery(ctx context.Context, client *lensclient.ChainClient, method string, reqBz []byte, md metadata.MD) (abcitypes.ResponseQuery, metadata.MD, error) {
+	// parse height header
+	height, err := lensclient.GetHeightFromMetadata(md)
+	if err != nil {
+		return abcitypes.ResponseQuery{}, nil, err
 	}
-	return out
+
+	prove, err := lensclient.GetProveFromMetadata(md)
+	if err != nil {
+		return abcitypes.ResponseQuery{}, nil, err
+	}
+
+	abciReq := abcitypes.RequestQuery{
+		Path:   method,
+		Data:   reqBz,
+		Height: height,
+		Prove:  prove,
+	}
+
+	//fmt.Println("query", "query", abciReq)
+
+	abciRes, err := client.QueryABCI(abciReq)
+	//fmt.Println(abciRes)
+	if err != nil {
+		return abcitypes.ResponseQuery{}, nil, err
+	}
+
+	return abciRes, md, nil
 }
 
 func doRequest(query Query) {
@@ -128,51 +158,29 @@ func doRequest(query Query) {
 		return
 	}
 	fmt.Println(query.Type)
-	var data []byte
+	newCtx := lensclient.SetHeightOnContext(ctx, query.Height)
+	pathParts := strings.Split(query.Type, "/")
+	if pathParts[len(pathParts)-1] == "key" { // fetch proof if the query is 'key'
+		newCtx = lensclient.SetProveOnContext(newCtx, true)
+	}
+	inMd, ok := metadata.FromOutgoingContext(newCtx)
+	fmt.Println("ctx", "ctx", ctx, "md", inMd)
+	if !ok {
+		panic("failed on not ok")
+	}
 
-	switch query.Type {
-	case "cosmos.bank.v1beta1.Query/AllBalances":
-		balances, _ := client.QueryAllBalances(query.Params["address"])
-		data = client.Codec.Marshaler.MustMarshalJSON(balances)
-
-	case "cosmos.tx.v1beta1.Query/GetTxEvents":
-		txs, err := client.QueryTxs(1, 100, convertParamsToEvents(query.Params))
-		if err != nil {
-			panic(err)
-		}
-
-		data, err = json.Marshal(txs)
-		if err != nil {
-			panic(err)
-		}
-	case "cosmos.staking.v1beta1.Query/DelegatorDelegations":
-		delegations, _ := staking.QueryDelegations(client, query.Params["address"], lensclient.DefaultPageRequest())
-		data = client.Codec.Marshaler.MustMarshalJSON(delegations)
-
-	case "cosmos.staking.v1beta1.Query/Validators":
-		validators, err := staking.QueryValidators(client, query.Params["status"], lensclient.DefaultPageRequest())
-		if err != nil {
-			panic(err)
-		}
-		data = client.Codec.Marshaler.MustMarshalJSON(validators)
-
-	default:
-		fmt.Println("Unexpected query type: ", query.Type)
+	res, _, err := RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
+	if err != nil {
+		panic(err)
 	}
 
 	// submit tx to queue
 	submitClient := clients.GetForChainId(query.SourceChainId)
 	from, _ := submitClient.GetKeyAddress()
-	msg := &qstypes.MsgSubmitQueryResponse{query.ChainId, query.QueryId, data, 0, submitClient.MustEncodeAccAddr(from)}
-	sendQueue[query.SourceChainId] <- msg
-}
+	fmt.Println("Result received", "result", res.Value, "proof", res.ProofOps)
 
-func convertParamsToEvents(params map[string]string) []string {
-	out := []string{}
-	for k, v := range params {
-		out = append(out, fmt.Sprintf("%s='%s'", k, v))
-	}
-	return out
+	msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: res.Value, Height: res.Height, ProofOps: res.ProofOps, FromAddress: submitClient.MustEncodeAccAddr(from)}
+	sendQueue[query.SourceChainId] <- msg
 }
 
 func FlushSendQueue(chainId string) {
@@ -181,7 +189,7 @@ func FlushSendQueue(chainId string) {
 	ch := sendQueue[chainId]
 
 	for {
-		if len(toSend) > 10 {
+		if len(toSend) > 12 {
 			flush(chainId, toSend)
 			toSend = []sdk.Msg{}
 		}
@@ -204,8 +212,9 @@ func flush(chainId string, toSend []sdk.Msg) {
 			return
 		}
 		// dedupe on queryId
-		resp, err := client.SendMsgs(context.Background(), unique(toSend))
-		fmt.Println(resp)
+		msgs := unique(toSend)
+		resp, err := client.SendMsgs(context.Background(), msgs)
+		fmt.Println(resp, "msgs", msgs)
 		if err != nil {
 			if resp != nil && resp.Code == 19 && resp.Codespace == "sdk" {
 				//if err.Error() == "transaction failed with code: 19" {
