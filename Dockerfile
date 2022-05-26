@@ -10,8 +10,11 @@ RUN git config --global url."git@github.com:".insteadOf "https://github.com/"
 RUN go env -w GOPRIVATE=github.com/ingenuity-build/*
 COPY go.mod go.mod
 COPY go.sum go.sum
+
+RUN go mod download
+
 COPY . .
-RUN go mod tidy
+
 RUN go build
 
 RUN ln -s /src/app/interchain-queries /usr/local/bin
