@@ -1,0 +1,7 @@
+version: '2.7'
+services:
+  icq:
+    image: quicksilverzone/interchain-queries:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
