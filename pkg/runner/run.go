@@ -18,7 +18,7 @@ import (
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/ingenuity-build/interchain-queries/pkg/config"
-	qstypes "github.com/ingenuity-build/quicksilver/x/interchainquery/types"
+	qstypes "github.com/persistenceOne/persistence-sdk/x/interchainquery/types"
 	lensclient "github.com/strangelove-ventures/lens/client"
 	lensquery "github.com/strangelove-ventures/lens/client/query"
 	abcitypes "github.com/tendermint/tendermint/abci/types"
@@ -95,9 +95,9 @@ func Run(cfg *config.Config, home string) error {
 		go FlushSendQueue(client.Config.ChainID)
 		fmt.Println("Flusher started")
 	}
-
+	//-----------------------
 	for _, client := range clients {
-		if client.Config.ChainID == "qstest-1" {
+		if client.Config.ChainID == "newtest-1" {
 			go func(c *lensclient.ChainClient) {
 			CNT:
 				for {
@@ -106,16 +106,12 @@ func Run(cfg *config.Config, home string) error {
 						ConnectionId: "connection-0",
 					}
 
-					bz := c.Codec.Marshaler.MustMarshal(req)
-
-					res, err := c.RPCClient.ABCIQuery(ctx, "/quicksilver.interchainquery.v1.QuerySrvr/Queries", bz)
+					out, err := qstypes.NewQuerySrvrClient(c).Queries(ctx, req)
 					if err != nil {
 						if strings.Contains(err.Error(), "Client.Timeout") {
 							continue CNT
 						}
 					}
-					out := &qstypes.QueryRequestsResponse{}
-					c.Codec.Marshaler.MustUnmarshal(res.Response.Value, out)
 
 					go handleHistoricRequests(out.Queries, c.Config.ChainID)
 					time.Sleep(30 * time.Second)
@@ -533,6 +529,7 @@ func flush(chainId string, toSend []sdk.Msg) {
 		// dedupe on queryId
 		msgs := unique(toSend)
 		resp, err := client.SendMsgs(context.Background(), msgs)
+		fmt.Printf("%s, %s", resp, err)
 		if err != nil {
 			if resp != nil && resp.Code == 19 && resp.Codespace == "sdk" {
 				//if err.Error() == "transaction failed with code: 19" {
