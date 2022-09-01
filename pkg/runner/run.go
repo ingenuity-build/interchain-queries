@@ -106,16 +106,12 @@ func Run(cfg *config.Config, home string) error {
 						ConnectionId: "connection-0",
 					}
 
-					bz := c.Codec.Marshaler.MustMarshal(req)
-
-					res, err := c.RPCClient.ABCIQuery(ctx, "/quicksilver.interchainquery.v1.QuerySrvr/Queries", bz)
+					out, err := qstypes.NewQuerySrvrClient(c).Queries(ctx, req)
 					if err != nil {
 						if strings.Contains(err.Error(), "Client.Timeout") {
 							continue CNT
 						}
 					}
-					out := &qstypes.QueryRequestsResponse{}
-					c.Codec.Marshaler.MustUnmarshal(res.Response.Value, out)
 
 					go handleHistoricRequests(out.Queries, c.Config.ChainID)
 					time.Sleep(30 * time.Second)
