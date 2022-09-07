@@ -97,15 +97,15 @@ func Run(cfg *config.Config, home string) error {
 	}
 
 	for _, client := range clients {
-		if client.Config.ChainID == "qstest-1" {
+		if client.Config.ChainID != cfg.DefaultChain {
 			go func(c *lensclient.ChainClient) {
 			CNT:
 				for {
 					req := &qstypes.QueryRequestsRequest{
-						Pagination:   &querytypes.PageRequest{Limit: 500},
-						ConnectionId: "connection-0",
+						Pagination: &querytypes.PageRequest{Limit: 500},
+						ChainId:    client.Config.ChainID,
 					}
-
+          
 					out, err := qstypes.NewQuerySrvrClient(c).Queries(ctx, req)
 					if err != nil {
 						if strings.Contains(err.Error(), "Client.Timeout") {
