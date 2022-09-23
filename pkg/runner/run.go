@@ -29,8 +29,8 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
-	clienttypes "github.com/cosmos/ibc-go/v3/modules/core/02-client/types"
-	tmclient "github.com/cosmos/ibc-go/v3/modules/light-clients/07-tendermint/types"
+	clienttypes "github.com/cosmos/ibc-go/v5/modules/core/02-client/types"
+	tmclient "github.com/cosmos/ibc-go/v5/modules/light-clients/07-tendermint/types"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	tmtypes "github.com/tendermint/tendermint/types"
 )
@@ -64,64 +64,69 @@ func Run(cfg *config.Config, home string) error {
 		clients = append(clients, client)
 	}
 
+	fmt.Println("clients", clients, cfg.DefaultChain)
 	query := tmquery.MustParse(fmt.Sprintf("message.module='%s'", "interchainquery"))
 
 	wg := &sync.WaitGroup{}
 
-	for _, client := range clients {
-		err := client.RPCClient.Start()
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		ch, err := client.RPCClient.Subscribe(ctx, client.Config.ChainID+"-icq", query.String())
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
-		wg.Add(1)
-		go func(chainId string, ch <-chan coretypes.ResultEvent) {
-			for v := range ch {
-				v.Events["source"] = []string{chainId}
-				go handleEvent(v)
-			}
-		}(client.Config.ChainID, ch)
-
-		fmt.Println("Client started")
+	defaultClient := clients.GetForChainId(cfg.DefaultChain)
+	err := defaultClient.RPCClient.Start()
+	if err != nil {
+		fmt.Println(err)
 	}
 
-	for _, client := range clients {
-		wg.Add(1)
-		go FlushSendQueue(client.Config.ChainID)
-		fmt.Println("Flusher started")
+	ch, err := defaultClient.RPCClient.Subscribe(ctx, defaultClient.Config.ChainID+"-icq", query.String())
+	if err != nil {
+		fmt.Println(err)
+		return err
 	}
+	wg.Add(1)
+	go func(chainId string, ch <-chan coretypes.ResultEvent) {
+		for v := range ch {
+			v.Events["source"] = []string{chainId}
+			go handleEvent(v)
+		}
+	}(defaultClient.Config.ChainID, ch)
+
+	fmt.Println("Client started")
+
+	wg.Add(1)
+	go FlushSendQueue(defaultClient.Config.ChainID)
+	fmt.Println("Flusher started")
 
 	for _, client := range clients {
 		if client.Config.ChainID != cfg.DefaultChain {
 			go func(c *lensclient.ChainClient) {
 			CNT:
 				for {
+					fmt.Println(client)
 					req := &qstypes.QueryRequestsRequest{
 						Pagination: &querytypes.PageRequest{Limit: 500},
 						ChainId:    client.Config.ChainID,
 					}
 
 					bz := c.Codec.Marshaler.MustMarshal(req)
-
+					fmt.Println("Fetching historic queries for chain", client.Config.ChainID)
 					res, err := c.RPCClient.ABCIQuery(ctx, "/quicksilver.interchainquery.v1.QuerySrvr/Queries", bz)
 					if err != nil {
 						if strings.Contains(err.Error(), "Client.Timeout") {
+							fmt.Println("Timeout: ", err)
 							continue CNT
 						}
 					}
+					fmt.Println("Fetched historic queries for chain", client.Config.ChainID)
 					out := &qstypes.QueryRequestsResponse{}
-					c.Codec.Marshaler.MustUnmarshal(res.Response.Value, out)
-
+					err = c.Codec.Marshaler.Unmarshal(res.Response.Value, out)
+					if err != nil {
+						fmt.Println("Unable to unmarshal: ", err)
+						continue CNT
+					}
+					fmt.Printf("Got %d queries\n", len(out.Queries))
 					go handleHistoricRequests(out.Queries, c.Config.ChainID)
 					time.Sleep(30 * time.Second)
 
 				}
-			}(client)
+			}(defaultClient)
 			wg.Add(1)
 		}
 	}
@@ -243,7 +248,6 @@ func doRequest(query Query) {
 	var err error
 	client := clients.GetForChainId(query.ChainId)
 	if client == nil {
-		fmt.Println("No chain")
 		return
 	}
 	if query.Height == 0 {
@@ -311,12 +315,7 @@ func doRequest(query Query) {
 
 		clientId := connection.Connection.ClientId
 		clientHeight := clienttypes.NewHeight(clienttypes.ParseChainID(query.ChainId), uint64(out.Height))
-		lightBlock, err := retryLightblock(ctx, client, out.Height, 5)
-		if err != nil {
-			fmt.Println("Error: Could not fetch updated LC from chain - bailing: ", err) // requeue
-			return
-		}
-		header, err := getHeader(ctx, client, submitClient, clientId, clientHeight, *lightBlock)
+		header, err := getHeader(ctx, client, submitClient, clientId, clientHeight)
 		if err != nil {
 			fmt.Println("Error: Could not get header: ", err)
 			return
@@ -335,18 +334,11 @@ func doRequest(query Query) {
 	// submit tx to queue
 	from, _ := submitClient.GetKeyAddress()
 	if pathParts[len(pathParts)-1] == "key" {
-		// update client
-		fmt.Println("Fetching client update for height", "height", res.Height+1)
-		lightBlock, err := retryLightblock(ctx, client, res.Height+1, 5)
-		if err != nil {
-			fmt.Println("Error: Could not fetch updated LC from chain - bailing: ", err) // requeue
-			return
-		}
 
 		submitQuerier := lensquery.Query{Client: submitClient, Options: lensquery.DefaultOptions()}
 		connection, err := submitQuerier.Ibc_Connection(query.ConnectionId)
 		if err != nil {
-			fmt.Println("Error: Could not get connection from chain: ", err)
+			fmt.Println("Error: fetching connection: ", err)
 			return
 		}
 
@@ -369,9 +361,9 @@ func doRequest(query Query) {
 			return
 		}
 
-		if lightBlock.Height > int64(clientHeight.RevisionHeight) {
+		if res.Height+1 > int64(clientHeight.RevisionHeight) {
 
-			header, err := getHeader(ctx, client, submitClient, clientId, clientHeight, *lightBlock)
+			header, err := getHeader(ctx, client, submitClient, clientId, clientHeight)
 			if err != nil {
 				fmt.Println("Error: Could not get header: ", err)
 				return
@@ -407,17 +399,11 @@ func doRequest(query Query) {
 	sendQueue[query.SourceChainId] <- msg
 }
 
-func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient, clientId string, clientHeight clienttypes.Height, lightBlock tmtypes.LightBlock) (*tmclient.Header, error) {
-	valSet := tmtypes.NewValidatorSet(lightBlock.ValidatorSet.Validators)
-	protoVal, err := valSet.ToProto()
-	if err != nil {
-		return nil, fmt.Errorf("Could not get valset from chain", err)
-	}
-
+func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient, clientId string, clientHeight clienttypes.Height) (*tmclient.Header, error) {
 	submitQuerier := lensquery.Query{Client: submitClient, Options: lensquery.DefaultOptions()}
 	consensusStatesResponse, err := submitQuerier.Ibc_ConsensusStates(clientId) // pass in from request
 	if err != nil {
-		return nil, fmt.Errorf("Error: Could not get consensus state from chain: ", err)
+		return nil, fmt.Errorf("Error: Could not get consensus state from chain: %v ", err)
 
 	}
 	consensusStates := consensusStatesResponse.GetConsensusStates()
@@ -436,11 +422,25 @@ func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient
 
 	unpackedConsensus, err := clienttypes.UnpackConsensusState(consensusStates[0].ConsensusState)
 	if err != nil {
-		return nil, fmt.Errorf("Error: Could not unpack consensus state from chain: ", err)
+		return nil, fmt.Errorf("Error: Could not unpack consensus state from chain: %v", err)
 	}
 
 	tmConsensus := unpackedConsensus.(*tmclient.ConsensusState)
+	//------------------------------------------------------
 
+	// update client
+	fmt.Println("Fetching client update for height", "height", clientHeight.RevisionHeight+1)
+	lightBlock, err := retryLightblock(ctx, client, int64(clientHeight.RevisionHeight+1), 5)
+	if err != nil {
+		fmt.Println("Error: Could not fetch updated LC from chain - bailing: ", err) // requeue
+		panic("Error: Could not fetch updated LC from chain - bailing")
+	}
+	valSet := tmtypes.NewValidatorSet(lightBlock.ValidatorSet.Validators)
+	protoVal, err := valSet.ToProto()
+	if err != nil {
+		fmt.Println("Error: Could not get valset from chain: ", err)
+		panic("Error: Could not get valset from chain:")
+	}
 	var trustedValset *tmproto.ValidatorSet
 	if bytes.Equal(valSet.Hash(), tmConsensus.NextValidatorsHash) {
 		trustedValset = protoVal
@@ -448,12 +448,12 @@ func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient
 		fmt.Println("Fetching client update for height", "height", clientHeight.RevisionHeight+1)
 		lightBlock2, err := retryLightblock(ctx, client, int64(clientHeight.RevisionHeight), 5)
 		if err != nil {
-			return nil, fmt.Errorf("Error: Could not fetch updated LC2 from chain - bailing: ", err) // requeue
+			return nil, fmt.Errorf("Error: Could not fetch updated LC2 from chain - bailing: %v", err) // requeue
 		}
 		valSet := tmtypes.NewValidatorSet(lightBlock2.ValidatorSet.Validators)
 		trustedValset, err = valSet.ToProto()
 		if err != nil {
-			return nil, fmt.Errorf("Error: Could not get valset2 from chain: ", err)
+			return nil, fmt.Errorf("Error: Could not get valset2 from chain: %v", err)
 		}
 	}
 
@@ -527,16 +527,18 @@ func flush(chainId string, toSend []sdk.Msg) {
 		fmt.Printf("Send batch of %d messages\n", len(toSend))
 		client := clients.GetForChainId(chainId)
 		if client == nil {
-			fmt.Println("No chain")
 			return
 		}
 		// dedupe on queryId
 		msgs := unique(toSend)
-		resp, err := client.SendMsgs(context.Background(), msgs)
+		resp, err := client.SendMsgs(context.Background(), msgs, "icq/v0.5.0")
 		if err != nil {
 			if resp != nil && resp.Code == 19 && resp.Codespace == "sdk" {
 				//if err.Error() == "transaction failed with code: 19" {
 				fmt.Println("Tx in mempool")
+			} else if resp != nil && resp.Code == 12 && resp.Codespace == "sdk" {
+				//if err.Error() == "transaction failed with code: 19" {
+				fmt.Println("Not enough gas")
 			} else {
 				panic(err)
 			}

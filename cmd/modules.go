@@ -11,15 +11,15 @@ import (
 	distrclient "github.com/cosmos/cosmos-sdk/x/distribution/client"
 	feegrant "github.com/cosmos/cosmos-sdk/x/feegrant/module"
 	"github.com/cosmos/cosmos-sdk/x/gov"
+	govclient "github.com/cosmos/cosmos-sdk/x/gov/client"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	"github.com/cosmos/cosmos-sdk/x/params"
 	paramsclient "github.com/cosmos/cosmos-sdk/x/params/client"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	"github.com/cosmos/cosmos-sdk/x/upgrade"
-	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
-	"github.com/cosmos/ibc-go/v3/modules/apps/transfer"
-	ibc "github.com/cosmos/ibc-go/v3/modules/core"
+	"github.com/cosmos/ibc-go/v5/modules/apps/transfer"
+	ibc "github.com/cosmos/ibc-go/v5/modules/core"
 	interchainquery "github.com/ingenuity-build/quicksilver/x/interchainquery"
 )
 
@@ -34,7 +34,7 @@ var ModuleBasics = []module.AppModuleBasic{
 	// TODO: add osmosis governance proposal types here
 	// TODO: add other proposal types here
 	gov.NewAppModuleBasic(
-		paramsclient.ProposalHandler, distrclient.ProposalHandler, upgradeclient.ProposalHandler, upgradeclient.CancelProposalHandler,
+		[]govclient.ProposalHandler{paramsclient.ProposalHandler, distrclient.ProposalHandler},
 	),
 	crisis.AppModuleBasic{},
 	distribution.AppModuleBasic{},
