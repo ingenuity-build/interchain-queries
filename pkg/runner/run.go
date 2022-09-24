@@ -1,9 +1,9 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -31,7 +31,6 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	clienttypes "github.com/cosmos/ibc-go/v5/modules/core/02-client/types"
 	tmclient "github.com/cosmos/ibc-go/v5/modules/light-clients/07-tendermint/types"
-	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	tmtypes "github.com/tendermint/tendermint/types"
 )
 
@@ -314,8 +313,7 @@ func doRequest(query Query) {
 		}
 
 		clientId := connection.Connection.ClientId
-		clientHeight := clienttypes.NewHeight(clienttypes.ParseChainID(query.ChainId), uint64(out.Height))
-		header, err := getHeader(ctx, client, submitClient, clientId, clientHeight)
+		header, err := getHeader(ctx, client, submitClient, clientId, out.Height-1)
 		if err != nil {
 			fmt.Println("Error: Could not get header: ", err)
 			return
@@ -343,125 +341,90 @@ func doRequest(query Query) {
 		}
 
 		clientId := connection.Connection.ClientId
-		state, err := submitQuerier.Ibc_ClientState(clientId) // pass in from request
+
+		header, err := getHeader(ctx, client, submitClient, clientId, res.Height)
 		if err != nil {
-			fmt.Println("Error: Could not get state from chain: ", err)
+			fmt.Println("Error: Could not get header: ", err)
 			return
 		}
-		unpackedState, err := clienttypes.UnpackClientState(state.ClientState)
+		anyHeader, err := clienttypes.PackHeader(header)
 		if err != nil {
-			fmt.Println("Error: Could not unpack state from chain: ", err)
+			fmt.Println("Error: Could not get pack header: ", err)
 			return
 		}
 
-		trustedHeight := unpackedState.GetLatestHeight()
-		clientHeight, ok := trustedHeight.(clienttypes.Height)
-		if !ok {
-			fmt.Println("Error: Could coerce trusted height")
-			return
+		msg := &clienttypes.MsgUpdateClient{
+			ClientId: clientId, // needs to be passed in as part of request.
+			Header:   anyHeader,
+			Signer:   submitClient.MustEncodeAccAddr(from),
 		}
 
-		if res.Height+1 > int64(clientHeight.RevisionHeight) {
+		sendQueue[query.SourceChainId] <- msg
+		// } else {
+		// 	newCtx = lensclient.SetHeightOnContext(newCtx, int64(clientHeight.RevisionHeight)-1)
+		// 	inMd, _ = metadata.FromOutgoingContext(newCtx)
+		// 	fmt.Println("Rerunning Query")
+		// 	res, _, err = RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
+		// 	if err != nil {
+		// 		panic(err)
+		// 	}
 
-			header, err := getHeader(ctx, client, submitClient, clientId, clientHeight)
-			if err != nil {
-				fmt.Println("Error: Could not get header: ", err)
-				return
-			}
-
-			anyHeader, err := clienttypes.PackHeader(header)
-			if err != nil {
-				fmt.Println("Error: Could not get pack header: ", err)
-				return
-			}
-
-			msg := &clienttypes.MsgUpdateClient{
-				ClientId: clientId, // needs to be passed in as part of request.
-				Header:   anyHeader,
-				Signer:   submitClient.MustEncodeAccAddr(from),
-			}
-
-			sendQueue[query.SourceChainId] <- msg
-		} else {
-			newCtx = lensclient.SetHeightOnContext(newCtx, int64(clientHeight.RevisionHeight)-1)
-			inMd, _ = metadata.FromOutgoingContext(newCtx)
-			fmt.Println("Rerunning Query")
-			res, _, err = RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
-			if err != nil {
-				panic(err)
-			}
-
-		}
-
+		// }
 	}
 
 	msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: res.Value, Height: res.Height, ProofOps: res.ProofOps, FromAddress: submitClient.MustEncodeAccAddr(from)}
 	sendQueue[query.SourceChainId] <- msg
 }
 
-func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient, clientId string, clientHeight clienttypes.Height) (*tmclient.Header, error) {
+func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient, clientId string, requestHeight int64) (*tmclient.Header, error) {
 	submitQuerier := lensquery.Query{Client: submitClient, Options: lensquery.DefaultOptions()}
-	consensusStatesResponse, err := submitQuerier.Ibc_ConsensusStates(clientId) // pass in from request
+	state, err := submitQuerier.Ibc_ClientState(clientId) // pass in from request
 	if err != nil {
-		return nil, fmt.Errorf("Error: Could not get consensus state from chain: %v ", err)
-
+		return nil, errors.New(fmt.Sprintf("Error: Could not get state from chain:: %q ", err.Error()))
 	}
-	consensusStates := consensusStatesResponse.GetConsensusStates()
-	sort.Slice(consensusStates, func(i, j int) bool {
-		return consensusStates[i].Height.RevisionHeight < consensusStates[j].Height.RevisionHeight
-	})
-
-	var consensusState clienttypes.ConsensusStateWithHeight
-	for _, i := range consensusStates {
-		if i.Height.RevisionHeight < clientHeight.RevisionHeight && (consensusState.Height.RevisionHeight == 0 || consensusState.Height.RevisionHeight < i.Height.RevisionHeight) {
-			consensusState = i
-		} else {
-			break
-		}
+	unpackedState, err := clienttypes.UnpackClientState(state.ClientState)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Error: Could not unpack state from chain: %q ", err.Error()))
 	}
 
-	unpackedConsensus, err := clienttypes.UnpackConsensusState(consensusStates[0].ConsensusState)
-	if err != nil {
-		return nil, fmt.Errorf("Error: Could not unpack consensus state from chain: %v", err)
+	trustedHeight := unpackedState.GetLatestHeight()
+	clientHeight, ok := trustedHeight.(clienttypes.Height)
+	if !ok {
+		return nil, errors.New("Error: Could coerce trusted height")
+
 	}
 
-	tmConsensus := unpackedConsensus.(*tmclient.ConsensusState)
-	//------------------------------------------------------
-
-	// update client
-	fmt.Println("Fetching client update for height", "height", clientHeight.RevisionHeight+1)
-	lightBlock, err := retryLightblock(ctx, client, int64(clientHeight.RevisionHeight+1), 5)
+	fmt.Println("Fetching client update for height", "height", requestHeight+1)
+	newBlock, err := retryLightblock(ctx, client, int64(requestHeight+1), 5)
 	if err != nil {
-		fmt.Println("Error: Could not fetch updated LC from chain - bailing: ", err) // requeue
+		//fmt.Println("Error: Could not fetch updated LC from chain - bailing: ", err) // requeue
 		panic("Error: Could not fetch updated LC from chain - bailing")
 	}
-	valSet := tmtypes.NewValidatorSet(lightBlock.ValidatorSet.Validators)
+
+	trustedBlock, err := retryLightblock(ctx, client, int64(clientHeight.RevisionHeight)+1, 5)
+	if err != nil {
+		//fmt.Println("Error: Could not fetch trusted LC from chain - bailing: ", err) // requeue
+		panic("Error: Could not fetch trusted LC from chain - bailing")
+	}
+
+	valSet := tmtypes.NewValidatorSet(newBlock.ValidatorSet.Validators)
+	trustedValSet := tmtypes.NewValidatorSet(trustedBlock.ValidatorSet.Validators)
 	protoVal, err := valSet.ToProto()
 	if err != nil {
 		fmt.Println("Error: Could not get valset from chain: ", err)
 		panic("Error: Could not get valset from chain:")
 	}
-	var trustedValset *tmproto.ValidatorSet
-	if bytes.Equal(valSet.Hash(), tmConsensus.NextValidatorsHash) {
-		trustedValset = protoVal
-	} else {
-		fmt.Println("Fetching client update for height", "height", clientHeight.RevisionHeight+1)
-		lightBlock2, err := retryLightblock(ctx, client, int64(clientHeight.RevisionHeight), 5)
-		if err != nil {
-			return nil, fmt.Errorf("Error: Could not fetch updated LC2 from chain - bailing: %v", err) // requeue
-		}
-		valSet := tmtypes.NewValidatorSet(lightBlock2.ValidatorSet.Validators)
-		trustedValset, err = valSet.ToProto()
-		if err != nil {
-			return nil, fmt.Errorf("Error: Could not get valset2 from chain: %v", err)
-		}
+	trustedProtoVal, err := trustedValSet.ToProto()
+	if err != nil {
+		fmt.Println("Error: Could not get trusted valset from chain: ", err)
+		panic("Error: Could not get trusted valset from chain:")
 	}
 
 	header := &tmclient.Header{
-		SignedHeader:      lightBlock.SignedHeader.ToProto(),
+		SignedHeader:      newBlock.SignedHeader.ToProto(),
 		ValidatorSet:      protoVal,
 		TrustedHeight:     clientHeight,
-		TrustedValidators: trustedValset,
+		TrustedValidators: trustedProtoVal,
 	}
 
 	return header, nil
