@@ -36,7 +36,7 @@ import (
 
 type Clients []*lensclient.ChainClient
 
-const VERSION = "icq/v0.6.0"
+const VERSION = "icq/v0.6.1"
 
 var (
 	WaitInterval       = time.Second * 3
