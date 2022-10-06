@@ -79,8 +79,8 @@ func Run(cfg *config.Config, home string) error {
 	defer wg.Wait()
 
 	defaultClient := clients.GetForChainId(cfg.DefaultChain)
-	if defaultClient.RPCClient == nil {
-		panic("unable to create default client; RPCClient is nil")
+	if defaultClient == nil {
+		panic("unable to create default client; Client is nil")
 	}
 	err := defaultClient.RPCClient.Start()
 	if err != nil {

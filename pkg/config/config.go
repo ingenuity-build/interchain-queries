@@ -61,8 +61,7 @@ func OverwriteConfig(cfg *Config) error {
 type Config struct {
 	DefaultChain string                               `yaml:"default_chain" json:"default_chain"`
 	Chains       map[string]*client.ChainClientConfig `yaml:"chains" json:"chains"`
-
-	Cl map[string]*client.ChainClient
+	Cl           map[string]*client.ChainClient       `yaml:",omitempty" json:",omitempty"`
 }
 
 func (c *Config) GetDefaultClient() *client.ChainClient {
@@ -100,10 +99,50 @@ func (c Config) MustYAML() []byte {
 
 func defaultConfig(keyHome string, debug bool) []byte {
 	return Config{
-		DefaultChain: "cosmoshub",
+		DefaultChain: "quicksilver-1",
 		Chains: map[string]*client.ChainClientConfig{
-			"cosmoshub": client.GetCosmosHubConfig(keyHome, debug),
-			"osmosis":   client.GetOsmosisConfig(keyHome, debug),
+			"quicksilver-1": GetQuicksilverConfig(keyHome, debug),
+			"osmosis-1":     GetOsmosisConfig(keyHome, debug),
 		},
 	}.MustYAML()
+}
+
+func GetQuicksilverConfig(keyHome string, debug bool) *client.ChainClientConfig {
+	return &client.ChainClientConfig{
+		Key:            "default",
+		ChainID:        "quicksilver-1",
+		RPCAddr:        "https://rpc.quicksilver.zone:443",
+		GRPCAddr:       "https://grpc.quicksilver.zone:443",
+		AccountPrefix:  "quick",
+		KeyringBackend: "test",
+		GasAdjustment:  1.2,
+		GasPrices:      "0.01uqck",
+		MinGasAmount:   0,
+		KeyDirectory:   keyHome,
+		Debug:          debug,
+		Timeout:        "20s",
+		BlockTimeout:   "10s",
+		OutputFormat:   "json",
+		SignModeStr:    "direct",
+	}
+}
+
+func GetOsmosisConfig(keyHome string, debug bool) *client.ChainClientConfig {
+	return &client.ChainClientConfig{
+		Key:            "default",
+		ChainID:        "osmosis-1",
+		RPCAddr:        "https://osmosis-1.technofractal.com:443",
+		GRPCAddr:       "https://gprc.osmosis-1.technofractal.com:443",
+		AccountPrefix:  "osmo",
+		KeyringBackend: "test",
+		GasAdjustment:  1.2,
+		GasPrices:      "0.01uosmo",
+		MinGasAmount:   0,
+		KeyDirectory:   keyHome,
+		Debug:          debug,
+		Timeout:        "20s",
+		BlockTimeout:   "10s",
+		OutputFormat:   "json",
+		SignModeStr:    "direct",
+	}
 }
