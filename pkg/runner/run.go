@@ -76,6 +76,7 @@ func Run(cfg *config.Config, home string) error {
 	query := tmquery.MustParse(fmt.Sprintf("message.module='%s'", "interchainquery"))
 
 	wg := &sync.WaitGroup{}
+	defer wg.Wait()
 
 	defaultClient := clients.GetForChainId(cfg.DefaultChain)
 	if defaultClient.RPCClient == nil {
@@ -143,7 +144,6 @@ func Run(cfg *config.Config, home string) error {
 		}
 	}
 
-	wg.Wait()
 	return nil
 }
 
@@ -239,7 +239,7 @@ func RunGRPCQuery(ctx context.Context, client *lensclient.ChainClient, method st
 
 func retryLightblock(ctx context.Context, client *lensclient.ChainClient, height int64, maxTime int, logger log.Logger) (*tmtypes.LightBlock, error) {
 	interval := 1
-	logger.Log("msg", "uerying lightblock", "attempt", interval)
+	logger.Log("msg", "Querying lightblock", "attempt", interval)
 	lightBlock, err := client.LightProvider.LightBlock(ctx, height)
 	if err != nil {
 		for {
