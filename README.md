@@ -41,6 +41,9 @@ chains:
 
 ## Changelog
 
+### v0.6.1
+- Fix wg.Wait() deferal bug (#4)
+
 ### v0.6.0
 
 - Add structured logging.
