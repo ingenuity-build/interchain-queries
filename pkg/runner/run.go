@@ -108,7 +108,7 @@ func Run(cfg *config.Config, home string) error {
 
 	for _, client := range clients {
 		if client.Config.ChainID != cfg.DefaultChain {
-			go func(c *lensclient.ChainClient, logger log.Logger) {
+			go func(c *lensclient.ChainClient, client *lensclient.ChainClient, logger log.Logger) {
 			CNT:
 				for {
 					req := &qstypes.QueryRequestsRequest{
@@ -139,7 +139,7 @@ func Run(cfg *config.Config, home string) error {
 					time.Sleep(30 * time.Second)
 
 				}
-			}(defaultClient, log.With(logger, "chain", defaultClient.Config.ChainID, "src_chain", client.Config.ChainID))
+			}(defaultClient, client, log.With(logger, "chain", defaultClient.Config.ChainID, "src_chain", client.Config.ChainID))
 			wg.Add(1)
 		}
 	}
