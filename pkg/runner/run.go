@@ -336,6 +336,9 @@ func doRequest(query Query, logger log.Logger) {
 		resp := qstypes.GetTxWithProofResponse{Tx: protoTx, TxResponse: out, Proof: &protoProof, Header: header}
 		res.Value = client.Codec.Marshaler.MustMarshal(&resp)
 
+	case "ibc.UpdateClient":
+		submitClientUpdate(client, submitClient, query, int64(sdk.BigEndianToUint64(query.Request)), logger)
+		return
 	default:
 		res, _, err = RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
 		if err != nil {
@@ -346,37 +349,41 @@ func doRequest(query Query, logger log.Logger) {
 	// submit tx to queue
 	from, _ := submitClient.GetKeyAddress()
 	if pathParts[len(pathParts)-1] == "key" {
-
-		submitQuerier := lensquery.Query{Client: submitClient, Options: lensquery.DefaultOptions()}
-		connection, err := submitQuerier.Ibc_Connection(query.ConnectionId)
-		if err != nil {
-			logger.Log("msg", fmt.Sprintf("Error: Could not fetch connection %s", err))
-			return
-		}
-
-		clientId := connection.Connection.ClientId
-
-		header, err := getHeader(ctx, client, submitClient, clientId, res.Height, logger)
-		if err != nil {
-			logger.Log("msg", fmt.Sprintf("Error: Could not get header %s", err))
-			return
-		}
-		anyHeader, err := clienttypes.PackHeader(header)
-		if err != nil {
-			logger.Log("msg", fmt.Sprintf("Error: Could not pack header %s", err))
-			return
-		}
-
-		msg := &clienttypes.MsgUpdateClient{
-			ClientId: clientId, // needs to be passed in as part of request.
-			Header:   anyHeader,
-			Signer:   submitClient.MustEncodeAccAddr(from),
-		}
-
-		sendQueue[query.SourceChainId] <- msg
+		submitClientUpdate(client, submitClient, query, res.Height, logger)
 	}
 
 	msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: res.Value, Height: res.Height, ProofOps: res.ProofOps, FromAddress: submitClient.MustEncodeAccAddr(from)}
+	sendQueue[query.SourceChainId] <- msg
+}
+
+func submitClientUpdate(client, submitClient *lensclient.ChainClient, query Query, height int64, logger log.Logger) {
+	from, _ := submitClient.GetKeyAddress()
+	submitQuerier := lensquery.Query{Client: submitClient, Options: lensquery.DefaultOptions()}
+	connection, err := submitQuerier.Ibc_Connection(query.ConnectionId)
+	if err != nil {
+		logger.Log("msg", fmt.Sprintf("Error: Could not fetch connection %s", err))
+		return
+	}
+
+	clientId := connection.Connection.ClientId
+
+	header, err := getHeader(ctx, client, submitClient, clientId, height, logger)
+	if err != nil {
+		logger.Log("msg", fmt.Sprintf("Error: Could not get header %s", err))
+		return
+	}
+	anyHeader, err := clienttypes.PackHeader(header)
+	if err != nil {
+		logger.Log("msg", fmt.Sprintf("Error: Could not pack header %s", err))
+		return
+	}
+
+	msg := &clienttypes.MsgUpdateClient{
+		ClientId: clientId, // needs to be passed in as part of request.
+		Header:   anyHeader,
+		Signer:   submitClient.MustEncodeAccAddr(from),
+	}
+
 	sendQueue[query.SourceChainId] <- msg
 }
 
