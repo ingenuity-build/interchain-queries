@@ -24,6 +24,7 @@ import (
 	lensquery "github.com/strangelove-ventures/lens/client/query"
 	abcitypes "github.com/tendermint/tendermint/abci/types"
 	tmquery "github.com/tendermint/tendermint/libs/pubsub/query"
+	"github.com/tendermint/tendermint/proto/tendermint/crypto"
 	rpcclient "github.com/tendermint/tendermint/rpc/client"
 	coretypes "github.com/tendermint/tendermint/rpc/core/types"
 	"google.golang.org/grpc/metadata"
@@ -36,7 +37,7 @@ import (
 
 type Clients []*lensclient.ChainClient
 
-const VERSION = "icq/v0.6.2"
+const VERSION = "icq/v0.7.4"
 
 var (
 	WaitInterval       = time.Second * 3
@@ -336,12 +337,17 @@ func doRequest(query Query, logger log.Logger) {
 		resp := qstypes.GetTxWithProofResponse{Tx: protoTx, TxResponse: out, Proof: &protoProof, Header: header}
 		res.Value = client.Codec.Marshaler.MustMarshal(&resp)
 
-	case "ibc.UpdateClient":
+	case "ibc.ClientUpdate":
 		submitClientUpdate(client, submitClient, query, int64(sdk.BigEndianToUint64(query.Request)), logger)
+		// return a dummy message to settle the query.
+		from, _ := submitClient.GetKeyAddress()
+		msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: []byte{}, Height: int64(sdk.BigEndianToUint64(query.Request)), ProofOps: &crypto.ProofOps{}, FromAddress: submitClient.MustEncodeAccAddr(from)}
+		sendQueue[query.SourceChainId] <- msg
 		return
 	default:
 		res, _, err = RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
 		if err != nil {
+			logger.Log("msg", "Error: Failed in RunGRPCQuery", "type", query.Type, "id", query.QueryId, "height", query.Height)
 			panic(err)
 		}
 	}
