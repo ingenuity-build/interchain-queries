@@ -37,11 +37,12 @@ import (
 
 type Clients []*lensclient.ChainClient
 
-const VERSION = "icq/v0.7.4"
+const VERSION = "icq/v0.7.6"
 
 var (
-	WaitInterval       = time.Second * 3
-	MaxHistoricQueries = 50
+	WaitInterval       = time.Second * 6
+	MaxHistoricQueries = 25
+	MaxTxMsgs          = 8
 	clients            = Clients{}
 	ctx                = context.Background()
 	sendQueue          = map[string]chan sdk.Msg{}
@@ -122,9 +123,9 @@ func Run(cfg *config.Config, home string) error {
 					if err != nil {
 						if strings.Contains(err.Error(), "Client.Timeout") {
 							logger.Log("error", fmt.Sprintf("timeout: %s", err.Error()))
-
 							continue CNT
 						}
+						panic(err)
 					}
 					out := &qstypes.QueryRequestsResponse{}
 					err = c.Codec.Marshaler.Unmarshal(res.Response.Value, out)
@@ -484,20 +485,21 @@ func FlushSendQueue(chainId string, logger log.Logger) error {
 	ch := sendQueue[chainId]
 
 	for {
-		if len(toSend) > 15 {
+		if len(toSend) > MaxTxMsgs {
 			flush(chainId, toSend, logger)
 			toSend = []sdk.Msg{}
 		}
 		select {
 		case msg := <-ch:
 			toSend = append(toSend, msg)
-		case <-time.After(time.Millisecond * 1500):
+		case <-time.After(WaitInterval):
 			flush(chainId, toSend, logger)
 			toSend = []sdk.Msg{}
 		}
 	}
 }
 
+// TODO: refactor me!
 func flush(chainId string, toSend []sdk.Msg, logger log.Logger) {
 	if len(toSend) > 0 {
 		logger.Log("msg", fmt.Sprintf("Sending batch of %d messages", len(toSend)))
@@ -507,7 +509,8 @@ func flush(chainId string, toSend []sdk.Msg, logger log.Logger) {
 		}
 		// dedupe on queryId
 		msgs := unique(toSend, logger)
-		resp, err := client.SendMsgs(context.Background(), msgs, VERSION)
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*15)
+		resp, err := client.SendMsgs(ctx, msgs, VERSION)
 		if err != nil {
 			if resp != nil && resp.Code == 19 && resp.Codespace == "sdk" {
 				//if err.Error() == "transaction failed with code: 19" {
@@ -515,6 +518,24 @@ func flush(chainId string, toSend []sdk.Msg, logger log.Logger) {
 			} else if resp != nil && resp.Code == 12 && resp.Codespace == "sdk" {
 				//if err.Error() == "transaction failed with code: 19" {
 				logger.Log("msg", "Not enough gas")
+			} else if err.Error() == "context deadline exceeded" {
+				logger.Log("msg", "Failed to submit in time, retrying")
+				resp, err := client.SendMsgs(ctx, msgs, VERSION)
+				if err != nil {
+					if resp != nil && resp.Code == 19 && resp.Codespace == "sdk" {
+						//if err.Error() == "transaction failed with code: 19" {
+						logger.Log("msg", "Tx already in mempool")
+					} else if resp != nil && resp.Code == 12 && resp.Codespace == "sdk" {
+						//if err.Error() == "transaction failed with code: 19" {
+						logger.Log("msg", "Not enough gas")
+					} else if err.Error() == "context deadline exceeded" {
+						logger.Log("msg", "Failed to submit in time, bailing")
+						return
+					} else {
+						panic(err)
+					}
+				}
+
 			} else {
 				panic(err)
 			}
