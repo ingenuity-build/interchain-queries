@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/ingenuity-build/interchain-queries/prommetrics"
 	"math"
 	"os"
 	"sort"
@@ -55,7 +56,7 @@ func (clients Clients) GetForChainId(chainId string) *lensclient.ChainClient {
 	return nil
 }
 
-func Run(cfg *config.Config, home string) error {
+func Run(cfg *config.Config, home string, metrics prommetrics.Metrics) error {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC, "caller", log.DefaultCaller)
 
@@ -70,6 +71,7 @@ func Run(cfg *config.Config, home string) error {
 
 		logger.Log("worker", "init", "msg", "configured chain", "chain", client.Config.ChainID)
 		sendQueue[client.Config.ChainID] = make(chan sdk.Msg)
+		metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue[client.Config.ChainID])))
 		clients = append(clients, client)
 	}
 
@@ -99,12 +101,12 @@ func Run(cfg *config.Config, home string) error {
 		for v := range ch {
 			v.Events["source"] = []string{chainId}
 			// why does this always trigger twice? messages are deduped later, but this causes 2x queries to trigger.
-			go handleEvent(v, log.With(logger, "worker", "client", "chain", defaultClient.Config.ChainID))
+			go handleEvent(v, log.With(logger, "worker", "client", "chain", defaultClient.Config.ChainID), metrics)
 		}
 	}(defaultClient.Config.ChainID, ch)
 
 	wg.Add(1)
-	go FlushSendQueue(defaultClient.Config.ChainID, log.With(logger, "worker", "flusher", "chain", defaultClient.Config.ChainID))
+	go FlushSendQueue(defaultClient.Config.ChainID, log.With(logger, "worker", "flusher", "chain", defaultClient.Config.ChainID), metrics)
 
 	for _, client := range clients {
 		if client.Config.ChainID != cfg.DefaultChain {
@@ -134,7 +136,7 @@ func Run(cfg *config.Config, home string) error {
 					logger.Log("worker", "client", "msg", "fetched historic queries for chain", "count", len(out.Queries))
 
 					if len(out.Queries) > 0 {
-						go handleHistoricRequests(out.Queries, c.Config.ChainID, log.With(logger, "worker", "historic"))
+						go handleHistoricRequests(out.Queries, c.Config.ChainID, log.With(logger, "worker", "historic"), metrics)
 					}
 					time.Sleep(30 * time.Second)
 
@@ -157,7 +159,9 @@ type Query struct {
 	Request       []byte
 }
 
-func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logger log.Logger) {
+func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logger log.Logger, metrics prommetrics.Metrics) {
+
+	metrics.HistoricQueries.WithLabelValues("historic-queries").Set(float64(len(queries)))
 
 	if len(queries) == 0 {
 		return
@@ -177,11 +181,12 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 		q.Request = query.Request
 		q.Type = query.QueryType
 		logger.Log("msg", "Handling existing query", "id", query.Id)
-		go doRequest(q, logger)
+		go doRequestWithMetrics(q, logger, metrics)
+		metrics.HistoricQueries.WithLabelValues("historic-queries").Dec()
 	}
 }
 
-func handleEvent(event coretypes.ResultEvent, logger log.Logger) {
+func handleEvent(event coretypes.ResultEvent, logger log.Logger, metrics prommetrics.Metrics) {
 	queries := []Query{}
 	source := event.Events["source"]
 	connections := event.Events["message.connection_id"]
@@ -206,7 +211,7 @@ func handleEvent(event coretypes.ResultEvent, logger log.Logger) {
 	}
 
 	for _, q := range queries {
-		go doRequest(q, log.With(logger, "src_chain", q.ChainId))
+		go doRequestWithMetrics(q, log.With(logger, "src_chain", q.ChainId), metrics)
 	}
 }
 
@@ -256,8 +261,17 @@ func retryLightblock(ctx context.Context, client *lensclient.ChainClient, height
 	}
 	return lightBlock, err
 }
+func doRequestWithMetrics(query Query, logger log.Logger, metrics prommetrics.Metrics) {
+	startTime := time.Now()
+	metrics.Requests.WithLabelValues("host-requests").Inc()
+	doRequest(query, logger, metrics)
+	endTime := time.Now()
 
-func doRequest(query Query, logger log.Logger) {
+	metrics.Requests.WithLabelValues("host-requests").Inc()
+	metrics.RequestsLatency.WithLabelValues("host-requests").Observe(endTime.Sub(startTime).Seconds())
+}
+
+func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 	var err error
 	client := clients.GetForChainId(query.ChainId)
 	if client == nil {
@@ -374,6 +388,7 @@ func doRequest(query Query, logger log.Logger) {
 		}
 
 		sendQueue[query.SourceChainId] <- msg
+		metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue)))
 	}
 
 	msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: res.Value, Height: res.Height, ProofOps: res.ProofOps, FromAddress: submitClient.MustEncodeAccAddr(from)}
@@ -465,7 +480,7 @@ type intoAny interface {
 	AsAny() *codectypes.Any
 }
 
-func FlushSendQueue(chainId string, logger log.Logger) error {
+func FlushSendQueue(chainId string, logger log.Logger, metrics prommetrics.Metrics) error {
 	time.Sleep(WaitInterval)
 	toSend := []sdk.Msg{}
 	ch := sendQueue[chainId]
@@ -478,8 +493,10 @@ func FlushSendQueue(chainId string, logger log.Logger) error {
 		select {
 		case msg := <-ch:
 			toSend = append(toSend, msg)
+			metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue[chainId])))
 		case <-time.After(time.Millisecond * 1500):
 			flush(chainId, toSend, logger)
+			metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue[chainId])))
 			toSend = []sdk.Msg{}
 		}
 	}

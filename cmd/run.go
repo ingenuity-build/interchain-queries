@@ -1,12 +1,16 @@
 /*
 Copyright © 2022 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
 import (
 	"github.com/ingenuity-build/interchain-queries/pkg/runner"
+	"github.com/ingenuity-build/interchain-queries/prommetrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
+	"log"
+	"net/http"
 )
 
 // runCmd represents the run command
@@ -20,7 +24,15 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		runner.Run(cfg, cmd.Flag("home").Value.String())
+		reg := prometheus.NewRegistry()
+		m := prommetrics.NewMetrics(reg)
+		promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+		http.Handle("/metrics", promHandler)
+		go func() {
+			log.Fatal(http.ListenAndServe(":2112", nil))
+		}()
+		go runner.Run(cfg, cmd.Flag("home").Value.String(), *m)
+
 	},
 }
 
