@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 
@@ -44,7 +43,7 @@ func initConfig(cmd *cobra.Command) error {
 	}
 
 	// read the config file bytes
-	file, err := ioutil.ReadFile(viper.ConfigFileUsed())
+	file, err := os.ReadFile(viper.ConfigFileUsed())
 	if err != nil {
 		fmt.Println("Error reading file:", err)
 		os.Exit(1)
@@ -87,7 +86,7 @@ func initConfig(cmd *cobra.Command) error {
 		}
 
 		// Should output be a global configuration item?
-		for chain, _ := range cfg.Chains {
+		for chain := range cfg.Chains {
 			cfg.Chains[chain].OutputFormat = output
 		}
 	}

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/spf13/cobra"
@@ -105,7 +105,7 @@ $ %s k r --chain ibc-1 faucet-key`, appName, appName)),
 			}
 
 			fmt.Print("Enter mnemonic 🔑: ")
-			mnemonic, _ := terminal.ReadPassword(0)
+			mnemonic, _ := term.ReadPassword(0)
 			fmt.Println()
 
 			address, err := cl.RestoreKey(keyName, string(mnemonic), 118)
@@ -345,6 +345,9 @@ func errKeyDoesntExist(name string) error {
 
 func skipConfirm(cmd *cobra.Command) *cobra.Command {
 	cmd.Flags().BoolP("skip", "y", false, "output using yaml")
-	viper.BindPFlag("skip", cmd.Flags().Lookup("skip"))
+	err := viper.BindPFlag("skip", cmd.Flags().Lookup("skip"))
+	if err != nil {
+		return nil
+	}
 	return cmd
 }
