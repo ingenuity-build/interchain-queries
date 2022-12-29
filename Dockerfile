@@ -1,9 +1,8 @@
-FROM golang:1.18-bullseye as build
+FROM golang:1.19-alpine3.17 as build
 
-RUN apt update && apt install git
 WORKDIR /src/app
-ENV GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
-RUN git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+RUN apk add --no-cache gcc musl-dev
 
 COPY go.mod go.mod
 COPY go.sum go.sum
@@ -14,10 +13,12 @@ COPY . .
 
 RUN go build
 
-FROM debian:bullseye
+FROM alpine:edge
+
+RUN apk add --no-cache ca-certificates
 
 COPY --from=build /src/app/interchain-queries /usr/local/bin/interchain-queries
 
-RUN adduser --system --home /icq --disabled-password --disabled-login icq -U 1000
+RUN adduser -S -h /icq -D icq -u 1000
 
 USER icq

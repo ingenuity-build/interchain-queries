@@ -42,12 +42,12 @@ import (
 
 type Clients []*lensclient.ChainClient
 
-const VERSION = "icq/v0.7.6"
+const VERSION = "icq/v0.7.7-debug"
 
 var (
 	WaitInterval       = time.Second * 6
 	MaxHistoricQueries = 25
-	MaxTxMsgs          = 8
+	MaxTxMsgs          = 15
 	clients            = Clients{}
 	ctx                = context.Background()
 	sendQueue          = map[string]chan sdk.Msg{}
@@ -141,7 +141,7 @@ func Run(cfg *config.Config, home string) error {
 							logger.Log("error", fmt.Sprintf("timeout: %s", err.Error()))
 							continue CNT
 						}
-						panic(err)
+						panic(fmt.Sprintf("panic(3): %v", err))
 					}
 					out := &qstypes.QueryRequestsResponse{}
 					err = c.Codec.Marshaler.Unmarshal(res.Response.Value, out)
@@ -217,11 +217,11 @@ func handleEvent(event coretypes.ResultEvent, logger log.Logger, metrics prommet
 	for i := 0; i < items; i++ {
 		req, err := hex.DecodeString(request[i])
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("panic(4): %v", err))
 		}
 		h, err := strconv.ParseInt(height[i], 10, 64)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("panic(5): %v", err))
 		}
 		queries = append(queries, Query{source[0], connections[i], chains[i], queryIds[i], types[i], h, req})
 	}
@@ -291,10 +291,11 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 	if client == nil {
 		return
 	}
+	// needs caching big time
 	if query.Height == 0 {
 		block, err := client.RPCClient.Block(ctx, nil)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("panic(6): %v", err))
 		}
 		query.Height = block.Block.LastCommit.Height - 1
 	}
@@ -375,7 +376,7 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 		res, _, err = RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
 		if err != nil {
 			logger.Log("msg", "Error: Failed in RunGRPCQuery", "type", query.Type, "id", query.QueryId, "height", query.Height)
-			panic(err)
+			panic(fmt.Sprintf("panic(7): %v", err))
 		}
 	}
 
@@ -442,23 +443,23 @@ func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient
 	logger.Log("msg", "Fetching client update for height", "height", requestHeight+1)
 	newBlock, err := retryLightblock(ctx, client, int64(requestHeight+1), 5, logger)
 	if err != nil {
-		panic("Error: Could not fetch updated LC from chain - bailing")
+		panic(fmt.Sprintf("Error: Could not fetch updated LC from chain - bailing: %v", err))
 	}
 
 	trustedBlock, err := retryLightblock(ctx, client, int64(clientHeight.RevisionHeight)+1, 5, logger)
 	if err != nil {
-		panic("Error: Could not fetch trusted LC from chain - bailing")
+		panic(fmt.Sprintf("Error: Could not fetch updated LC from chain - bailing (2): %v", err))
 	}
 
 	valSet := tmtypes.NewValidatorSet(newBlock.ValidatorSet.Validators)
 	trustedValSet := tmtypes.NewValidatorSet(trustedBlock.ValidatorSet.Validators)
 	protoVal, err := valSet.ToProto()
 	if err != nil {
-		panic("Error: Could not get valset from chain:")
+		panic(fmt.Sprintf("Error: Could not get valset from chain: %v", err))
 	}
 	trustedProtoVal, err := trustedValSet.ToProto()
 	if err != nil {
-		panic("Error: Could not get trusted valset from chain:")
+		panic(fmt.Sprintf("Error: Could not get trusted valset from chain: %v", err))
 	}
 
 	header := &tmclient.Header{
@@ -561,12 +562,12 @@ func flush(chainId string, toSend []sdk.Msg, logger log.Logger) {
 						logger.Log("msg", "Failed to submit in time, bailing")
 						return
 					} else {
-						panic(err)
+						panic(fmt.Sprintf("panic(1): %v", err))
 					}
 				}
 
 			} else {
-				panic(err)
+				panic(fmt.Sprintf("panic(2): %v", err))
 			}
 		}
 		logger.Log("msg", fmt.Sprintf("Sent batch of %d (deduplicated) messages", len(msgs)))

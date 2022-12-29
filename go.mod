@@ -6,8 +6,8 @@ require (
 	github.com/cosmos/cosmos-sdk v0.46.7
 	github.com/cosmos/ibc-go/v5 v5.1.0
 	github.com/go-kit/log v0.2.1
-	github.com/ingenuity-build/quicksilver v0.9.4
 	github.com/prometheus/client_golang v1.13.0
+  github.com/ingenuity-build/quicksilver v1.0.0
 	github.com/spf13/cobra v1.6.0
 	github.com/spf13/viper v1.13.0
 	github.com/strangelove-ventures/lens v0.5.2-0.20220907143146-cc0bde60edd0
@@ -149,7 +149,6 @@ require (
 )
 
 replace (
-	github.com/CosmWasm/wasmd => github.com/notional-labs/wasmd v0.25.1-0.20220918064224-459cefae5a9a
+	github.com/CosmWasm/wasmd => github.com/notional-labs/wasmd v0.29.0-sdk46.0.20221114145317-d6e67fd50956
 	github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
-	github.com/ingenuity-build/quicksilver => ../quicksilver
 )
