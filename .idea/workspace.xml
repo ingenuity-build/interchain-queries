@@ -5,6 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="a432fc7e-6502-4dc6-bde9-ff5a5752103a" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.github/.dependabot.yml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.github/workflow/lint.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cmd/config.go" beforeDir="false" afterPath="$PROJECT_DIR$/cmd/config.go" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cmd/keys.go" beforeDir="false" afterPath="$PROJECT_DIR$/cmd/keys.go" afterDir="false" />
@@ -91,6 +94,10 @@
   }
 }]]></component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+      <recent name="$PROJECT_DIR$/.github" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/prometheus" />
     </key>
