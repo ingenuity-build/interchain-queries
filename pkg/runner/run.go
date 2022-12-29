@@ -4,7 +4,12 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/ingenuity-build/interchain-queries/prommetrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	stdlog "log"
 	"math"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -63,6 +68,16 @@ func Run(cfg *config.Config, home string) error {
 
 	logger.Log("worker", "init", "msg", "starting icq relayer", "version", VERSION)
 
+	reg := prometheus.NewRegistry()
+	metrics := *prommetrics.NewMetrics(reg)
+
+	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+
+	http.Handle("/metrics", promHandler)
+	go func() {
+		stdlog.Fatal(http.ListenAndServe(":2112", nil))
+	}()
+
 	defer Close()
 	for _, c := range cfg.Chains {
 		client, err := lensclient.NewChainClient(nil, c, home, os.Stdin, os.Stdout)
@@ -72,6 +87,7 @@ func Run(cfg *config.Config, home string) error {
 
 		logger.Log("worker", "init", "msg", "configured chain", "chain", client.Config.ChainID)
 		sendQueue[client.Config.ChainID] = make(chan sdk.Msg)
+		metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue[client.Config.ChainID])))
 		clients = append(clients, client)
 	}
 
@@ -101,12 +117,12 @@ func Run(cfg *config.Config, home string) error {
 		for v := range ch {
 			v.Events["source"] = []string{chainId}
 			// why does this always trigger twice? messages are deduped later, but this causes 2x queries to trigger.
-			go handleEvent(v, log.With(logger, "worker", "client", "chain", defaultClient.Config.ChainID))
+			go handleEvent(v, log.With(logger, "worker", "client", "chain", defaultClient.Config.ChainID), metrics)
 		}
 	}(defaultClient.Config.ChainID, ch)
 
 	wg.Add(1)
-	go FlushSendQueue(defaultClient.Config.ChainID, log.With(logger, "worker", "flusher", "chain", defaultClient.Config.ChainID))
+	go FlushSendQueue(defaultClient.Config.ChainID, log.With(logger, "worker", "flusher", "chain", defaultClient.Config.ChainID), metrics)
 
 	for _, client := range clients {
 		if client.Config.ChainID != cfg.DefaultChain {
@@ -136,7 +152,7 @@ func Run(cfg *config.Config, home string) error {
 					logger.Log("worker", "client", "msg", "fetched historic queries for chain", "count", len(out.Queries))
 
 					if len(out.Queries) > 0 {
-						go handleHistoricRequests(out.Queries, c.Config.ChainID, log.With(logger, "worker", "historic"))
+						go handleHistoricRequests(out.Queries, c.Config.ChainID, log.With(logger, "worker", "historic"), metrics)
 					}
 					time.Sleep(30 * time.Second)
 
@@ -159,7 +175,9 @@ type Query struct {
 	Request       []byte
 }
 
-func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logger log.Logger) {
+func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logger log.Logger, metrics prommetrics.Metrics) {
+
+	metrics.HistoricQueries.WithLabelValues("historic-queries").Set(float64(len(queries)))
 
 	if len(queries) == 0 {
 		return
@@ -179,11 +197,12 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 		q.Request = query.Request
 		q.Type = query.QueryType
 		logger.Log("msg", "Handling existing query", "id", query.Id)
-		go doRequest(q, logger)
+		go doRequestWithMetrics(q, logger, metrics)
+		metrics.HistoricQueries.WithLabelValues("historic-queries").Dec()
 	}
 }
 
-func handleEvent(event coretypes.ResultEvent, logger log.Logger) {
+func handleEvent(event coretypes.ResultEvent, logger log.Logger, metrics prommetrics.Metrics) {
 	queries := []Query{}
 	source := event.Events["source"]
 	connections := event.Events["message.connection_id"]
@@ -208,7 +227,7 @@ func handleEvent(event coretypes.ResultEvent, logger log.Logger) {
 	}
 
 	for _, q := range queries {
-		go doRequest(q, log.With(logger, "src_chain", q.ChainId))
+		go doRequestWithMetrics(q, log.With(logger, "src_chain", q.ChainId), metrics)
 	}
 }
 
@@ -258,8 +277,15 @@ func retryLightblock(ctx context.Context, client *lensclient.ChainClient, height
 	}
 	return lightBlock, err
 }
+func doRequestWithMetrics(query Query, logger log.Logger, metrics prommetrics.Metrics) {
+	startTime := time.Now()
+	metrics.Requests.WithLabelValues("requests").Inc()
+	doRequest(query, logger, metrics)
+	endTime := time.Now()
+	metrics.RequestsLatency.WithLabelValues("request-latency").Observe(endTime.Sub(startTime).Seconds())
+}
 
-func doRequest(query Query, logger log.Logger) {
+func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 	var err error
 	client := clients.GetForChainId(query.ChainId)
 	if client == nil {
@@ -339,7 +365,7 @@ func doRequest(query Query, logger log.Logger) {
 		res.Value = client.Codec.Marshaler.MustMarshal(&resp)
 
 	case "ibc.ClientUpdate":
-		submitClientUpdate(client, submitClient, query, int64(sdk.BigEndianToUint64(query.Request)), logger)
+		submitClientUpdate(client, submitClient, query, int64(sdk.BigEndianToUint64(query.Request)), logger, metrics)
 		// return a dummy message to settle the query.
 		from, _ := submitClient.GetKeyAddress()
 		msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: []byte{}, Height: int64(sdk.BigEndianToUint64(query.Request)), ProofOps: &crypto.ProofOps{}, FromAddress: submitClient.MustEncodeAccAddr(from)}
@@ -356,14 +382,14 @@ func doRequest(query Query, logger log.Logger) {
 	// submit tx to queue
 	from, _ := submitClient.GetKeyAddress()
 	if pathParts[len(pathParts)-1] == "key" {
-		submitClientUpdate(client, submitClient, query, res.Height, logger)
+		submitClientUpdate(client, submitClient, query, res.Height, logger, metrics)
 	}
 
 	msg := &qstypes.MsgSubmitQueryResponse{ChainId: query.ChainId, QueryId: query.QueryId, Result: res.Value, Height: res.Height, ProofOps: res.ProofOps, FromAddress: submitClient.MustEncodeAccAddr(from)}
 	sendQueue[query.SourceChainId] <- msg
 }
 
-func submitClientUpdate(client, submitClient *lensclient.ChainClient, query Query, height int64, logger log.Logger) {
+func submitClientUpdate(client, submitClient *lensclient.ChainClient, query Query, height int64, logger log.Logger, metrics prommetrics.Metrics) {
 	from, _ := submitClient.GetKeyAddress()
 	submitQuerier := lensquery.Query{Client: submitClient, Options: lensquery.DefaultOptions()}
 	connection, err := submitQuerier.Ibc_Connection(query.ConnectionId)
@@ -392,6 +418,7 @@ func submitClientUpdate(client, submitClient *lensclient.ChainClient, query Quer
 	}
 
 	sendQueue[query.SourceChainId] <- msg
+	metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue)))
 }
 
 func getHeader(ctx context.Context, client, submitClient *lensclient.ChainClient, clientId string, requestHeight int64, logger log.Logger) (*tmclient.Header, error) {
@@ -479,7 +506,7 @@ type intoAny interface {
 	AsAny() *codectypes.Any
 }
 
-func FlushSendQueue(chainId string, logger log.Logger) error {
+func FlushSendQueue(chainId string, logger log.Logger, metrics prommetrics.Metrics) error {
 	time.Sleep(WaitInterval)
 	toSend := []sdk.Msg{}
 	ch := sendQueue[chainId]
@@ -492,8 +519,10 @@ func FlushSendQueue(chainId string, logger log.Logger) error {
 		select {
 		case msg := <-ch:
 			toSend = append(toSend, msg)
+			metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue[chainId])))
 		case <-time.After(WaitInterval):
 			flush(chainId, toSend, logger)
+			metrics.SendQueue.WithLabelValues("send-queue").Set(float64(len(sendQueue[chainId])))
 			toSend = []sdk.Msg{}
 		}
 	}
