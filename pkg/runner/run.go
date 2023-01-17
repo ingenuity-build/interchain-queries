@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"github.com/ingenuity-build/interchain-queries/prommetrics"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	stdlog "log"
 	"math"
 	"net/http"
@@ -16,6 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ingenuity-build/interchain-queries/prommetrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/go-kit/log"
 
@@ -42,7 +43,7 @@ import (
 
 type Clients []*lensclient.ChainClient
 
-const VERSION = "icq/v0.7.8"
+const VERSION = "icq/v0.8.0"
 
 var (
 	WaitInterval       = time.Second * 6
@@ -335,6 +336,28 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 	submitClient := clients.GetForChainId(query.SourceChainId)
 
 	switch query.Type {
+	// until we fix ordering and pagination in the binary, we can override the query here.
+	case "cosmos.tx.v1beta1.Service/GetTxsEvent":
+		request := txtypes.GetTxsEventRequest{}
+		err = client.Codec.Marshaler.Unmarshal(query.Request, &request)
+		if err != nil {
+			_ = logger.Log("msg", "Error: Failed in Unmarshalling Request", "type", query.Type, "id", query.QueryId, "height", query.Height)
+			panic(fmt.Sprintf("panic(7a): %v", err))
+		}
+		request.OrderBy = txtypes.OrderBy_ORDER_BY_DESC
+		query.Request, err = client.Codec.Marshaler.Marshal(&request)
+		if err != nil {
+			_ = logger.Log("msg", "Error: Failed in Marshalling Request", "type", query.Type, "id", query.QueryId, "height", query.Height)
+			panic(fmt.Sprintf("panic(7b): %v", err))
+		}
+
+		_ = logger.Log("msg", "Handling GetTxsEvents", "id", query.QueryId, "height", query.Height)
+		res, _, err = RunGRPCQuery(ctx, client, "/"+query.Type, query.Request, inMd)
+		if err != nil {
+			_ = logger.Log("msg", "Error: Failed in RunGRPCQuery", "type", query.Type, "id", query.QueryId, "height", query.Height)
+			panic(fmt.Sprintf("panic(7c): %v", err))
+		}
+
 	case "tendermint.Tx":
 		req := txtypes.GetTxRequest{}
 		client.Codec.Marshaler.MustUnmarshal(query.Request, &req)
