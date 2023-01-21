@@ -45,6 +45,15 @@ chains:
 ```
 
 ## Changelog
+### v0.8.2
+- Improved efficiency
+- More detailed metrics
+- Don't panic on failed txs
+- Don't query client headers that are going to be rejected
+
+### v0.8.0
+- Improved error handling
+- Add metrics
 
 ### v0.6.2
 - Fix default chain instantiation on first run
