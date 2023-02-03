@@ -11,6 +11,7 @@ type Metrics struct {
 	HistoricQueryRequests prometheus.CounterVec
 	ABCIRequests          prometheus.CounterVec
 	LightBlockRequests    prometheus.CounterVec
+	RemoteBlockHeight     prometheus.GaugeVec
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -56,7 +57,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "lightblock_reqs",
 			Help:      "number of lightblock requests",
 		}, []string{"name"}),
+		RemoteBlockHeight: *prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "icq",
+			Name:      "remote_height",
+			Help:      "remote chain height",
+		}, []string{"name", "chain_id"}),
 	}
-	reg.MustRegister(m.Requests, m.RequestsLatency, m.HistoricQueries, m.SendQueue, m.FailedTxs, m.HistoricQueryRequests, m.LightBlockRequests, m.ABCIRequests)
+	reg.MustRegister(m.Requests, m.RequestsLatency, m.HistoricQueries, m.SendQueue,
+		m.FailedTxs, m.HistoricQueryRequests, m.LightBlockRequests, m.ABCIRequests,
+		m.RemoteBlockHeight,
+	)
 	return m
 }
