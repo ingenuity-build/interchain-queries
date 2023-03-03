@@ -4,10 +4,10 @@ go 1.18
 
 require (
 	github.com/cosmos/cosmos-sdk v0.46.7
-	github.com/cosmos/ibc-go/v5 v5.1.0
+	github.com/cosmos/ibc-go/v5 v5.2.0
 	github.com/go-kit/log v0.2.1
+	github.com/ingenuity-build/quicksilver v1.0.0
 	github.com/prometheus/client_golang v1.13.0
-  	github.com/ingenuity-build/quicksilver v1.0.0
 	github.com/spf13/cobra v1.6.0
 	github.com/spf13/viper v1.13.0
 	github.com/strangelove-ventures/lens v0.5.2-0.20220907143146-cc0bde60edd0
@@ -29,7 +29,7 @@ require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/ChainSafe/go-schnorrkel v0.0.0-20200405005733-88cbf1b4c40d // indirect
-	github.com/armon/go-metrics v0.4.0 // indirect
+	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/avast/retry-go/v4 v4.1.0 // indirect
 	github.com/aws/aws-sdk-go v1.40.45 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
