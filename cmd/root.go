@@ -87,4 +87,5 @@ func init() {
 	}
 
 	rootCmd.AddCommand(keysCmd())
+	rootCmd.AddCommand(runCmd)
 }

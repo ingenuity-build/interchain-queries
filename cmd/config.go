@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/strangelove-ventures/lens/client"
-	"gopkg.in/yaml.v2"
 )
 
 // initConfig reads in config file and ENV variables if set.
@@ -28,6 +27,7 @@ func initConfig(cmd *cobra.Command) error {
 
 	cfg = &config.Config{}
 	cfgPath := path.Join(home, "config.yaml")
+	fmt.Println(cfg)
 	_, err = os.Stat(cfgPath)
 	if err != nil {
 		err = config.CreateConfig(home, debug)

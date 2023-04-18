@@ -19,6 +19,3 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=build /src/app/interchain-queries /usr/local/bin/interchain-queries
 
-RUN adduser -S -h /icq -D icq -u 1000
-
-USER icq

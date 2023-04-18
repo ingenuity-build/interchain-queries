@@ -70,6 +70,9 @@ func Run(cfg *config.Config, home string) error {
 
 	_ = logger.Log("worker", "init", "msg", "starting icq relayer", "version", VERSION)
 
+	logger.Log("home", home)
+	logger.Log("cfg", cfg)
+
 	reg := prometheus.NewRegistry()
 	metrics := *prommetrics.NewMetrics(reg)
 
