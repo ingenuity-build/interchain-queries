@@ -1,14 +1,12 @@
-/*
-Copyright © 2022 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
-	"github.com/ingenuity-build/interchain-queries/pkg/runner"
 	"github.com/spf13/cobra"
+
+	"github.com/ingenuity-build/interchain-queries/pkg/runner"
 )
 
-// runCmd represents the run command
+// runCmd represents the run command.
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "A brief description of your command",

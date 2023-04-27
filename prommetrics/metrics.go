@@ -17,12 +17,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		Requests: *prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "icq",
-			Name:      "requests",
+			Name:      "requests_total",
 			Help:      "number of host requests",
 		}, []string{"name", "type"}),
 		FailedTxs: *prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "icq",
-			Name:      "failed_txs",
+			Name:      "failed_txs_total",
 			Help:      "number of failed txs",
 		}, []string{"name"}),
 		RequestsLatency: *prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -43,17 +43,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"name"}),
 		HistoricQueryRequests: *prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "icq",
-			Name:      "historic_reqs",
+			Name:      "historic_reqs_total",
 			Help:      "number of historic query requests",
 		}, []string{"name"}),
 		ABCIRequests: *prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "icq",
-			Name:      "abci_reqs",
+			Name:      "abci_reqs_total",
 			Help:      "number of abci requests",
 		}, []string{"name", "type"}),
 		LightBlockRequests: *prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "icq",
-			Name:      "lightblock_reqs",
+			Name:      "lightblock_reqs_total",
 			Help:      "number of lightblock requests",
 		}, []string{"name"}),
 	}

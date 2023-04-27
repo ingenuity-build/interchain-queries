@@ -4,21 +4,22 @@ import (
 	"os"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/ingenuity-build/interchain-queries/pkg/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/ingenuity-build/interchain-queries/pkg/config"
 )
 
 var (
-	homePath       string
-	overridenChain string
-	debug          bool
-	cfg            *config.Config
-	defaultHome    = os.ExpandEnv("$HOME/.icq")
-	appName        = "lens"
+	homePath        string
+	overriddenChain string
+	debug           bool
+	cfg             *config.Config
+	defaultHome     = os.ExpandEnv("$HOME/.icq")
+	appName         = "lens"
 )
 
-// rootCmd represents the base command when called without any subcommands
+// rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "interchain-queries",
 	Short: "A brief description of your application",
@@ -58,10 +59,7 @@ func init() {
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		// reads `homeDir/config.yaml` into `var config *Config` before each command
-		if err := initConfig(rootCmd); err != nil {
-			return err
-		}
-		return nil
+		return initConfig(rootCmd)
 	}
 
 	// --home flag
@@ -81,7 +79,7 @@ func init() {
 		panic(err)
 	}
 
-	rootCmd.PersistentFlags().StringVar(&overridenChain, "chain", "", "override default chain")
+	rootCmd.PersistentFlags().StringVar(&overriddenChain, "chain", "", "override default chain")
 	if err := viper.BindPFlag("chain", rootCmd.PersistentFlags().Lookup("chain")); err != nil {
 		panic(err)
 	}
