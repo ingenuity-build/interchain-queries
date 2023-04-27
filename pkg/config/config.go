@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-//createConfig idempotently creates the config.
+// createConfig idempotently creates the config.
 func CreateConfig(home string, debug bool) error {
 	cfgPath := path.Join(home, "config.yaml")
 
