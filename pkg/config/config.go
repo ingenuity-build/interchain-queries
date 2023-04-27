@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// createConfig idempotently creates the config.
+// CreateConfig idempotently creates the config.
 func CreateConfig(home string, debug bool) error {
 	cfgPath := path.Join(home, "config.yaml")
 
@@ -21,7 +21,7 @@ func CreateConfig(home string, debug bool) error {
 		// And the home folder doesn't exist
 		if _, err := os.Stat(home); os.IsNotExist(err) {
 			// Create the home folder
-			if err = os.Mkdir(home, os.ModePerm); err != nil {
+			if err := os.Mkdir(home, os.ModePerm); err != nil {
 				return err
 			}
 		}
@@ -57,7 +57,7 @@ func OverwriteConfig(cfg *Config) error {
 	return nil
 }
 
-// Config represents the config file for the relayer
+// Config represents the config file for the relayer.
 type Config struct {
 	DefaultChain string                               `yaml:"default_chain" json:"default_chain"`
 	Chains       map[string]*client.ChainClientConfig `yaml:"chains" json:"chains"`
@@ -75,7 +75,7 @@ func (c *Config) GetClient(chainID string) *client.ChainClient {
 	return nil
 }
 
-// Called to initialize the relayer.Chain types on Config
+// ValidateConfig called to initialize the relayer.Chain types on Config.
 func ValidateConfig(c *Config) error {
 	for _, chain := range c.Chains {
 		if err := chain.Validate(); err != nil {
@@ -88,7 +88,7 @@ func ValidateConfig(c *Config) error {
 	return nil
 }
 
-// MustYAML returns the yaml string representation of the Paths
+// MustYAML returns the yaml string representation of the Paths.
 func (c Config) MustYAML() []byte {
 	out, err := yaml.Marshal(c)
 	if err != nil {

@@ -19,10 +19,10 @@ const (
 	defaultCoinType uint32 = sdk.CoinType
 )
 
-// FlagAccountPrefix allows the user to override the prefix for a given account
+// FlagAccountPrefix allows the user to override the prefix for a given account.
 var FlagAccountPrefix = ""
 
-// keysCmd represents the keys command
+// keysCmd represents the keys command.
 func keysCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "keys",
@@ -41,7 +41,7 @@ func keysCmd() *cobra.Command {
 	return cmd
 }
 
-// keysAddCmd respresents the `keys add` command
+// keysAddCmd represents the `keys add` command.
 func keysAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "add [name]",
@@ -85,7 +85,7 @@ $ %s k a osmo_key --chain osmosis`, appName, appName, appName)),
 	return cmd
 }
 
-// keysRestoreCmd respresents the `keys add` command
+// keysRestoreCmd represents the `keys add` command.
 func keysRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "restore [name]",
@@ -120,7 +120,7 @@ $ %s k r --chain ibc-1 faucet-key`, appName, appName)),
 	return cmd
 }
 
-// keysDeleteCmd respresents the `keys delete` command
+// keysDeleteCmd represents the `keys delete` command.
 func keysDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete [name]",
@@ -177,7 +177,7 @@ func askForConfirmation() bool {
 	}
 }
 
-// keysListCmd respresents the `keys list` command
+// keysListCmd represents the `keys list` command.
 func keysListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
@@ -205,7 +205,7 @@ $ %s k l ibc-1`, appName, appName)),
 	return cmd
 }
 
-// keysShowCmd respresents the `keys show` command
+// keysShowCmd represents the `keys show` command.
 func keysShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "show [name]",
@@ -253,7 +253,7 @@ type KeyEnumeration struct {
 	Addresses map[string]string `json:"addresses"`
 }
 
-// keysEnumerateCmd respresents the `keys enumerate` command
+// keysEnumerateCmd represents the `keys enumerate` command.
 func keysEnumerateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "enumerate [name]",
@@ -303,7 +303,7 @@ $ %s k e key2`, appName, appName, appName)),
 	return cmd
 }
 
-// keysExportCmd respresents the `keys export` command
+// keysExportCmd represents the `keys export` command.
 func keysExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "export [name]",
