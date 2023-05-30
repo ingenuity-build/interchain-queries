@@ -45,13 +45,13 @@ import (
 
 type Clients []*lensclient.ChainClient
 
-const VERSION = "icq/v0.8.8-beta"
+const VERSION = "icq/v0.9.1"
 
 var (
 	WaitInterval          = time.Second * 6
 	HistoricQueryInterval = time.Second * 15
-	MaxHistoricQueries    = 10
-	MaxTxMsgs             = 10
+	MaxHistoricQueries    = 12
+	MaxTxMsgs             = 12
 	ctx                   = context.Background()
 	sendQueue             = map[string]chan sdk.Msg{}
 	cache                 *ristretto.Cache
@@ -86,7 +86,7 @@ func Run(cfg *config.Config, home string) error {
 		BufferItems: 64,      // Number of keys per Get buffer.
 	})
 	if err != nil {
-		panic("unable to start risteretto cache")
+		panic("unable to start ristretto cache")
 	}
 
 	http.Handle("/metrics", promHandler)
@@ -225,15 +225,9 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(queries), func(i, j int) { queries[i], queries[j] = queries[j], queries[i] })
 
-	epochSkip := false
-	hr, min, _ := time.Now().Clock()
-	if (hr == 16 && min >= 55) || (hr == 17 && min < 8) {
-		epochSkip = true
-	} else {
-		sort.SliceStable(queries, func(i, j int) bool {
-			return queries[i].CallbackId == "allbalances" || queries[i].CallbackId == "depositinterval" || queries[i].CallbackId == "deposittx" // || queries[i].LastEmission.GT(queries[j].LastEmission)
-		})
-	}
+	sort.SliceStable(queries, func(i, j int) bool {
+		return queries[i].CallbackId == "allbalances" || queries[i].CallbackId == "depositinterval" || queries[i].CallbackId == "deposittx" // || queries[i].LastEmission.GT(queries[j].LastEmission)
+	})
 
 	for _, query := range queries[0:int(math.Min(float64(len(queries)), float64(MaxHistoricQueries)))] {
 		_, ok := globalCfg.Cl[query.ChainId]
@@ -241,15 +235,10 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 			continue
 		}
 
-		if epochSkip && (query.QueryType == "cosmos.tx.v1beta1.Service/GetTxsEvent" || query.QueryType == "tendermint.Tx") {
-			logger.Log("msg", fmt.Sprintf("skipping %s (%s) near epoch", query.Id, query.QueryType))
-			continue
-		}
 		q := Query{}
 		q.SourceChainId = sourceChainId
 		q.ChainId = query.ChainId
 		q.ConnectionId = query.ConnectionId
-		//q.Height = 0
 		q.QueryId = query.Id
 		q.Request = query.Request
 		q.Type = query.QueryType
@@ -260,7 +249,6 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 			continue
 		}
 
-		//if q.Height == 0 {
 		currentheight, found := cache.Get("currentblock/" + q.ChainId)
 		if !found {
 			block, err := globalCfg.Cl[q.ChainId].RPCClient.Block(ctx, nil)
@@ -274,7 +262,6 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 			logger.Log("msg", "using cached currentblock", "height", currentheight)
 		}
 		q.Height = currentheight.(int64)
-		//}
 
 		handle := false
 		if len(globalCfg.AllowedQueries) == 0 {
@@ -297,7 +284,6 @@ func handleHistoricRequests(queries []qstypes.Query, sourceChainId string, logge
 		time.Sleep(50 * time.Millisecond) // try to avoid thundering herd.
 
 		go doRequestWithMetrics(q, logger, metrics)
-		//metrics.HistoricQueries.WithLabelValues("historic-queries").Dec()
 	}
 }
 
@@ -371,17 +357,7 @@ func handleEvent(event coretypes.ResultEvent, logger log.Logger, metrics prommet
 		queries = append(queries, Query{source[0], connections[i], chains[i], queryIds[i], types[i], h, req})
 	}
 
-	epochSkip := false
-	hr, min, _ := time.Now().Clock()
-	if (hr == 16 && min >= 55) || (hr == 17 && min < 8) {
-		epochSkip = true
-	}
-
 	for _, q := range queries {
-		if epochSkip && (q.Type == "cosmos.tx.v1beta1.Service/GetTxsEvent" || q.Type == "tendermint.Tx") {
-			logger.Log("msg", fmt.Sprintf("skipping %s (%s) near epoch", q.QueryId, q.Type))
-			continue
-		}
 		go doRequestWithMetrics(q, log.With(logger, "src_chain", q.ChainId), metrics)
 	}
 }
@@ -486,7 +462,7 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 		request.OrderBy = txtypes.OrderBy_ORDER_BY_DESC
 		request.Limit = 200
 		request.Pagination.Limit = 200
-		//request.Events = append(request.Events, fmt.Sprintf("tx.height>%d", query.Height-200))
+
 		query.Request, err = client.Codec.Marshaler.Marshal(&request)
 		if err != nil {
 			_ = logger.Log("msg", "Error: Failed in Marshalling Request", "type", query.Type, "id", query.QueryId, "height", query.Height)
@@ -499,11 +475,6 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 			_ = logger.Log("msg", "Error: Failed in RunGRPCQuery", "type", query.Type, "id", query.QueryId, "height", query.Height)
 			panic(fmt.Sprintf("panic(7c): %v", err))
 		}
-		// response := txtypes.GetTxsEventResponse{}
-		// _ = client.Codec.Marshaler.Unmarshal(res.Value, &response)
-		// for _, txresp := range response.TxResponses {
-		// 	fmt.Println("HASH", txresp.TxHash)
-		// }
 
 	case "tendermint.Tx":
 		req := txtypes.GetTxRequest{}
@@ -534,7 +505,7 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 			return
 		}
 
-		protoTx, ok := out.Tx.GetCachedValue().(*txtypes.Tx)
+		_, ok := out.Tx.GetCachedValue().(*txtypes.Tx)
 		if !ok {
 			_ = logger.Log("msg", fmt.Sprintf("Error: Unexpected type, expect %T, got %T", txtypes.Tx{}, out.Tx.GetCachedValue()))
 			return
@@ -560,7 +531,7 @@ func doRequest(query Query, logger log.Logger, metrics prommetrics.Metrics) {
 			return
 		}
 
-		resp := qstypes.GetTxWithProofResponse{Tx: protoTx, TxResponse: out, Proof: &protoProof, Header: header}
+		resp := qstypes.GetTxWithProofResponse{Proof: &protoProof, Header: header}
 		res.Value = client.Codec.Marshaler.MustMarshal(&resp)
 
 	case "ibc.ClientUpdate":
@@ -813,10 +784,7 @@ func unique(msgSlice []sdk.Msg, logger log.Logger) []sdk.Msg {
 			}
 		}
 	}
-	if len(keys) == 0 {
-		_ = logger.Log("msg", "Avoid response containing only a client update")
-		return []sdk.Msg{}
-	}
+
 	return list
 }
 
