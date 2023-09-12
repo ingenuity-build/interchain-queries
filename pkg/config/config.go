@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-//createConfig idempotently creates the config.
+// createConfig idempotently creates the config.
 func CreateConfig(home string, debug bool) error {
 	cfgPath := path.Join(home, "config.yaml")
 
@@ -59,9 +59,11 @@ func OverwriteConfig(cfg *Config) error {
 
 // Config represents the config file for the relayer
 type Config struct {
-	DefaultChain string                               `yaml:"default_chain" json:"default_chain"`
-	Chains       map[string]*client.ChainClientConfig `yaml:"chains" json:"chains"`
-	Cl           map[string]*client.ChainClient       `yaml:",omitempty" json:",omitempty"`
+	DefaultChain   string                               `yaml:"default_chain" json:"default_chain"`
+	AllowedQueries []string                             `yaml:"allowed_queries" json:"allowed_queries"`
+	SkipEpoch      bool                                 `yaml:"skip_epoch" json:"skip_epoch"`
+	Chains         map[string]*client.ChainClientConfig `yaml:"chains" json:"chains"`
+	Cl             map[string]*client.ChainClient       `yaml:",omitempty" json:",omitempty"`
 }
 
 func (c *Config) GetDefaultClient() *client.ChainClient {
