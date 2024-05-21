@@ -1,5 +1,8 @@
 # Interchain Queries Relayer
 
+**This repository has been archived. The latest version of this codebase is available from [https://github.com/quicksilver-zone/quicksilver/
+](https://github.com/quicksilver-zone/quicksilver/tree/main/icq-relayer)**
+
 The Interchain Queries (ICQ) Relayer watches for events emitted by the ICQ module. It makes lookups against external chains, and returns query results and proofs such that the ICQ module is able to verify proofs and trigger the appropriate downstream action.
 
 ## Configuration
